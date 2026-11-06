@@ -3,8 +3,8 @@
 | Name | Role | Responsibilities |
 |------|------|------------------|
 | Amy |  |  |
-| Brittney |  |  |
-| Michael |  |  |
+| Brittany |  |  |
+| Cole |  |  |
 | Thomas |  |  |
 
 Scrum master (current sprint):Thomas
