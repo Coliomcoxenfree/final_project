@@ -1,10 +1,21 @@
 /********************************
-Name: Amy, Brittney, Michael, Thomas
+Name: Amy, Brittany, Cole, Thomas
 Problem Set: Final Group Project
 Due Date: November 6, 2026
 ********************************/
 
 package edu.uafs.fittingroom.server;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.UnknownHostException;
+
+import edu.uafs.fittingroom.protocol.Message;
 
 public class FittingRoomServer {
     private String serverId;
@@ -12,6 +23,7 @@ public class FittingRoomServer {
     private int coordPort;
     private int listenPort;
     private int roomCount;
+    private int requestCount = 0;
 
     public FittingRoomServer(String serverId, String coordHost, int coordPort, int listenPort, int roomCount) {
         this.serverId = serverId;
@@ -33,5 +45,65 @@ public class FittingRoomServer {
         int listenPort = Integer.parseInt(args[3]);
         int roomCount = Integer.parseInt(args[4]);
         new FittingRoomServer(serverId, coordHost, coordPort, listenPort, roomCount).start();
+    }
+
+    public void start() {
+        try (ServerSocket serverSocket = new ServerSocket(listenPort)) {
+            System.out.println(serverId + " listening on port " + listenPort + " with " + roomCount + " rooms");
+            registerWithCoordinator();
+            while (true) {
+                Socket socket = serverSocket.accept();
+                new Thread(() -> handleConnection(socket)).start();
+            }
+        } catch (IOException e) {
+            System.out.println(serverId + " error: " + e.getMessage());
+        }
+    }
+
+    //Each req gets next num
+    private synchronized String nextRequestId() {
+        requestCount++;
+        return serverId + "-" + requestCount;
+    }
+
+    //Sends reg to coordinator
+    private void registerWithCoordinator() {
+        String myHost = "localhost";
+        try {
+            myHost = InetAddress.getLocalHost().getHostAddress();
+        } catch (UnknownHostException e) {
+            //"localhost"
+        }
+
+        try (Socket socket = new Socket(coordHost, coordPort);
+             PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
+            out.println(new Message("REGISTER", nextRequestId(), serverId, myHost, String.valueOf(listenPort), String.valueOf(roomCount)));
+            String reply = in.readLine();
+            System.out.println(serverId + " registered with the Coordinator (reply: " + reply + ")");
+        } catch (IOException e) {
+            System.out.println("Could not reach the Coordinator: " + e.getMessage());
+            System.exit(1);
+        }
+    }
+
+    //Reads msgs from client conn until it closes
+    private void handleConnection(Socket socket) {
+        try (BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+             PrintWriter out = new PrintWriter(socket.getOutputStream(), true)) {
+            String line;
+            while ((line = in.readLine()) != null) {
+                try {
+                    Message m = Message.parse(line);
+                    System.out.println(serverId + " received " + m.type + " from " + m.senderId);
+                    //claim and release implementation later 
+                    out.println(new Message("ACKNOWLEDGMENT", m.requestId, serverId, "received"));
+                } catch (IllegalArgumentException e) {
+                    System.out.println("Rejected message: " + e.getMessage());
+                }
+            }
+        } catch (IOException e) {
+            System.out.println("Connection closed: " + e.getMessage());
+        }
     }
 }
