@@ -1,5 +1,5 @@
 /********************************
-Name: Amy, Brittany, Michael, Thomas
+Name: Amy, Brittany, Cole, Thomas
 Problem Set: Final Group Project
 Due Date: November 6, 2026
 ********************************/

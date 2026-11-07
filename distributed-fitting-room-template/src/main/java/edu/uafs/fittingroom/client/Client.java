@@ -1,5 +1,5 @@
 /********************************
-Name: Amy, Brittney, Michael, Thomas
+Name: Amy, Brittany, Cole, Thomas
 Problem Set: Final Group Project
 Due Date: November 6, 2026
 ********************************/
@@ -35,7 +35,7 @@ public class Client extends Thread {
             out.println(new Message("ARRIVE", requestId, customerId, customerId));
             System.out.println("[request=" + requestId + "] Customer " + customerId + " enters the system");
             String reply = in.readLine();
-            System.out.println(customerId + " received reply: " + reply);
+            System.out.println(customerId + " received reply: " + Message.parse(reply).displayMessage());
             // will make code to where the reply becomes a reservation, a queued notification, or full
         } catch (IOException e) {
             System.out.println(customerId + " could not connect: " + e.getMessage());

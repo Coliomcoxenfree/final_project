@@ -1,11 +1,14 @@
 /********************************
-Name: Amy, Brittney, Michael, Thomas
+Name: Amy, Brittany, Cole, Thomas
 Problem Set: Final Group Project
 Due Date: November 6, 2026
 ********************************/
 
 package edu.uafs.fittingroom.protocol;
 
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -50,6 +53,22 @@ public class Message {
             throw new IllegalArgumentException(type + " is missing a field");
         }
         return fields.get(i);
+    }
+
+    // Turns Timestamp as a readable local time, e.g. 2026-11-06 20:16:27.076
+    public String readableTime() {
+        return DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
+                .withZone(ZoneId.systemDefault())
+                .format(Instant.ofEpochMilli(timestamp));
+    }
+
+    // Displays text for printing to the console (toString stays the network format)
+    public String displayMessage() {
+        String text = type + " [" + requestId + "] from " + senderId + " at " + readableTime();
+        if (!fields.isEmpty()) {
+            text += " " + fields;
+        }
+        return text;
     }
 
     @Override

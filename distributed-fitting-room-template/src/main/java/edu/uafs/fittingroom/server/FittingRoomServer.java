@@ -80,7 +80,7 @@ public class FittingRoomServer {
              BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
             out.println(new Message("REGISTER", nextRequestId(), serverId, myHost, String.valueOf(listenPort), String.valueOf(roomCount)));
             String reply = in.readLine();
-            System.out.println(serverId + " registered with the Coordinator (reply: " + reply + ")");
+            System.out.println(serverId + " registered with the Coordinator (reply: " + Message.parse(reply).displayMessage() + ")");
         } catch (IOException e) {
             System.out.println("Could not reach the Coordinator: " + e.getMessage());
             System.exit(1);
