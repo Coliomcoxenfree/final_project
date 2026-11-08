@@ -147,6 +147,7 @@ public class FittingRoomServer {
                     out.println(new Message("ACKNOWLEDGMENT", m.requestId, serverId, "received"));
                 } catch (IllegalArgumentException e) {
                     System.out.println("Rejected message: " + e.getMessage());
+                    out.println(new Message("ERROR", "-", serverId, e.getMessage()));
                 }
             }
         } catch (IOException e) {
