@@ -59,6 +59,7 @@ public class Coordinator {
                     out.println(handleMessage(Message.parse(line)));
                 } catch (IllegalArgumentException e) {
                     System.out.println("Rejected message: " + e.getMessage());
+                    out.println(new Message("ERROR", "-", "Coordinator", e.getMessage()));
                 }
             }
         } catch (IOException e) {
