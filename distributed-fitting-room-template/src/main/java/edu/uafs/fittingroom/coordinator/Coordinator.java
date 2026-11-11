@@ -15,11 +15,14 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.LinkedList;
+import java.util.Queue;
 
 public class Coordinator {
     private int port;
     private int waitingCapacity; // 2 x total rooms
     private Map<String, ServerInfo> servers = new HashMap<>();
+    private Queue<Message> waitingQueue = new LinkedList<>();
 
     public Coordinator(int port) {
         this.port = port;
@@ -73,8 +76,7 @@ public class Coordinator {
             return new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "registered");
         }
         else if (m.type.equals("ARRIVE")) {
-            System.out.println("Coordinator received ARRIVE from " + m.senderId);
-            return new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "received");
+            return handleArrive(m);
         }
         else {
             throw new IllegalArgumentException("unknown message type " + m.type);
@@ -99,5 +101,23 @@ public class Coordinator {
 
         System.out.println(m.senderId + " registered at " + host + ":" + serverPort + " with " + rooms + " rooms");
         System.out.println("Waiting capacity = " + waitingCapacity);
+    }
+
+    private synchronized Message handleArrive(Message m) {
+        System.out.println("Coordinator received ARRIVE from " + m.senderId);
+
+        if (waitingQueue.size() >= waitingCapacity) {
+            System.out.println("Queue full. Rejecting " + m.senderId);
+            return new Message("REJECTED", m.requestId, "Coordinator", "system full");
+        }
+        // Message added to the back of queue
+        waitingQueue.offer(m);
+        System.out.println("Added " + m.senderId + " to waiting queue.");
+        return new Message("WAITING", m.requestId, "Coordinator", "queued at position " + waitingQueue.size());
+    }
+
+    // First in queue retrieved and removed. Returns null if empty
+    private synchronized Message getWaitingClient() {
+        return waitingQueue.poll();
     }
 }
