@@ -98,6 +98,7 @@ public class FittingRoomServer {
         try (ServerSocket serverSocket = new ServerSocket(listenPort)) {
             System.out.println(serverId + " listening on port " + listenPort + " with " + roomCount + " rooms");
             registerWithCoordinator();
+            startHeartbeat();
             while (true) {
                 Socket socket = serverSocket.accept();
                 new Thread(() -> handleConnection(socket)).start();
@@ -132,6 +133,47 @@ public class FittingRoomServer {
             System.out.println("Could not reach the Coordinator: " + e.getMessage());
             System.exit(1);
         }
+    }
+
+    //Sends msg -> coordinator
+    private void sendToCoord(Message message){
+        try (Socket socket = new Socket(coordHost, coordPort);
+             PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
+            out.println(message);
+            String reply = in.readLine();
+            System.out.println(serverId + " received reply from Coordinator (reply: " + Message.parse(reply).displayMessage() + ")");
+        } catch (IOException e) {
+            System.out.println("Could not reach the Coordinator: " + e.getMessage());
+            System.exit(1);
+        }
+    }
+
+    //Free room counts -> coordinator (For free and occupied rooms later)
+    private void reportCapacity(){
+        int freeRs = freeRoomCount();
+        Message msg = new Message("CAPACITY_UPDATE", nextRequestId(), serverId, String.valueOf(freeRs));
+        sendToCoord(msg);
+    }
+
+    //Heartbeat (1 sec)
+    private void startHeartbeat(){
+        Thread heartbeatThread = new Thread(() -> {
+            while(true){
+                try{
+                    Thread.sleep(1000);
+                    int freeRs = freeRoomCount();
+                    Message heartbeat = new Message("HEARTBEAT", "-", serverId, String.valueOf(freeRs));
+                    sendToCoord(heartbeat);
+                }
+                catch(InterruptedException e){
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        });
+        heartbeatThread.setDaemon(true);
+        heartbeatThread.start();
     }
 
     //Reads msgs from client conn until it closes
