@@ -1,7 +1,7 @@
 /********************************
 Name: Amy, Brittany, Cole, Thomas
 Problem Set: Final Group Project
-Due Date: November 6, 2026
+Due Date: December 11, 2026
 ********************************/
 
 package edu.uafs.fittingroom.coordinator;
@@ -59,6 +59,7 @@ public class Coordinator {
                     out.println(handleMessage(Message.parse(line)));
                 } catch (IllegalArgumentException e) {
                     System.out.println("Rejected message: " + e.getMessage());
+                    out.println(new Message("ERROR", "-", "Coordinator", e.getMessage()));
                 }
             }
         } catch (IOException e) {

@@ -1,7 +1,7 @@
 /********************************
 Name: Amy, Brittany, Cole, Thomas
 Problem Set: Final Group Project
-Due Date: November 6, 2026
+Due Date: December 11, 2026
 ********************************/
 
 package edu.uafs.fittingroom.protocol;

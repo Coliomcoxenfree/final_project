@@ -1,7 +1,7 @@
 /********************************
 Name: Amy, Brittany, Cole, Thomas
 Problem Set: Final Group Project
-Due Date: November 6, 2026
+Due Date: December 11, 2026
 ********************************/
 
 package edu.uafs.fittingroom.server;
@@ -23,6 +23,7 @@ public class FittingRoomServer {
     private int coordPort;
     private int listenPort;
     private int roomCount;
+    private Room[] rooms;
     private int requestCount = 0;
 
     public FittingRoomServer(String serverId, String coordHost, int coordPort, int listenPort, int roomCount) {
@@ -31,6 +32,10 @@ public class FittingRoomServer {
         this.coordPort = coordPort;
         this.listenPort = listenPort;
         this.roomCount = roomCount;
+        this.rooms = new Room[roomCount];
+        for(int i = 0; i < roomCount; i++) {
+            rooms[i] = new Room(i + 1);
+        }
     }
 
     public static void main(String[] args) {
@@ -45,6 +50,48 @@ public class FittingRoomServer {
         int listenPort = Integer.parseInt(args[3]);
         int roomCount = Integer.parseInt(args[4]);
         new FittingRoomServer(serverId, coordHost, coordPort, listenPort, roomCount).start();
+    }
+
+    public synchronized int allocateRoom(String customerId) {
+        for (Room r : rooms) {
+            if (customerId.equals(r.ownerId)) {
+                return r.roomId; //Prevents customers from taking multiple rooms at the same time
+            }
+        }
+        for (Room r : rooms) {
+            if (r.state == Room.RoomState.FREE) {
+                r.state = Room.RoomState.OCCUPIED;
+                r.ownerId = customerId;
+                return r.roomId;
+            }
+        }
+
+        return -1;
+    }
+
+    public synchronized boolean releaseRoom(String customerId, int roomId) {
+        if (roomId < 1 || roomId > rooms.length) {
+            return false;
+        }
+        Room r = rooms[roomId -1]; 
+        if (r.state == Room.RoomState.OCCUPIED && customerId.equals(r.ownerId)) {
+            r.state = Room.RoomState.FREE;
+            r.ownerId = null;
+            return true;
+        }
+
+        return false;
+    }
+
+    public synchronized int freeRoomCount() {
+        int count = 0;
+        for (Room r : rooms) {
+            if (r.state  == Room.RoomState.FREE) {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     public void start() {
@@ -100,6 +147,7 @@ public class FittingRoomServer {
                     out.println(new Message("ACKNOWLEDGMENT", m.requestId, serverId, "received"));
                 } catch (IllegalArgumentException e) {
                     System.out.println("Rejected message: " + e.getMessage());
+                    out.println(new Message("ERROR", "-", serverId, e.getMessage()));
                 }
             }
         } catch (IOException e) {
