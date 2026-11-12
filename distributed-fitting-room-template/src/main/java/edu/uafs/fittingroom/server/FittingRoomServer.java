@@ -163,7 +163,7 @@ public class FittingRoomServer {
                 try{
                     Thread.sleep(1000);
                     int freeRs = freeRoomCount();
-                    Message heartbeat = new Message("HEARTBEAT", "-", serverId, String.valueOf(freeRs));
+                    Message heartbeat = new Message("HEARTBEAT", nextRequestId(), serverId, String.valueOf(freeRs));
                     sendToCoord(heartbeat);
                 }
                 catch(InterruptedException e){
