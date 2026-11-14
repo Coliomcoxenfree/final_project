@@ -98,7 +98,6 @@ public class FittingRoomServer {
         try (ServerSocket serverSocket = new ServerSocket(listenPort)) {
             System.out.println(serverId + " listening on port " + listenPort + " with " + roomCount + " rooms");
             registerWithCoordinator();
-            startHeartbeat();
             while (true) {
                 Socket socket = serverSocket.accept();
                 new Thread(() -> handleConnection(socket)).start();
@@ -134,49 +133,19 @@ public class FittingRoomServer {
             System.exit(1);
         }
     }
-
-    //Sends msg -> coordinator
-    private void sendToCoord(Message message){
+// Reports current free room count back to the Coordinator
+    private void reportCapacity() {
         try (Socket socket = new Socket(coordHost, coordPort);
              PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
              BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
-            out.println(message);
-            String reply = in.readLine();
-            System.out.println(serverId + " received reply from Coordinator (reply: " + Message.parse(reply).displayMessage() + ")");
+            out.println(new Message("CAPACITY", nextRequestId(), serverId, String.valueOf(freeRoomCount()), String.valueOf(roomCount)));
+            in.readLine();
         } catch (IOException e) {
-            System.out.println("Could not reach the Coordinator: " + e.getMessage());
-            System.exit(1);
+            System.out.println(serverId + " failed to report capacity: " + e.getMessage());
         }
     }
 
-    //Free room counts -> coordinator (For free and occupied rooms later)
-    private void reportCapacity(){
-        int freeRs = freeRoomCount();
-        Message msg = new Message("CAPACITY_UPDATE", nextRequestId(), serverId, String.valueOf(freeRs));
-        sendToCoord(msg);
-    }
-
-    //Heartbeat (1 sec)
-    private void startHeartbeat(){
-        Thread heartbeatThread = new Thread(() -> {
-            while(true){
-                try{
-                    Thread.sleep(1000);
-                    int freeRs = freeRoomCount();
-                    Message heartbeat = new Message("HEARTBEAT", nextRequestId(), serverId, String.valueOf(freeRs));
-                    sendToCoord(heartbeat);
-                }
-                catch(InterruptedException e){
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-        });
-        heartbeatThread.setDaemon(true);
-        heartbeatThread.start();
-    }
-
-    //Reads msgs from client conn until it closes
+    // Reads msgs from client conn until it closes
     private void handleConnection(Socket socket) {
         try (BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
              PrintWriter out = new PrintWriter(socket.getOutputStream(), true)) {
@@ -184,9 +153,26 @@ public class FittingRoomServer {
             while ((line = in.readLine()) != null) {
                 try {
                     Message m = Message.parse(line);
-                    System.out.println(serverId + " received " + m.type + " from " + m.senderId);
-                    //claim and release implementation later 
-                    out.println(new Message("ACKNOWLEDGMENT", m.requestId, serverId, "received"));
+                    if ("RESERVE_REQUEST".equals(m.type)) {
+                        String customerId = m.field(0);
+                        int allocatedRoomId = allocateRoom(customerId);
+                        out.println(new Message("RESERVE_RESPONSE", m.requestId, serverId, String.valueOf(allocatedRoomId)));
+                        if (allocatedRoomId != -1) {
+                            reportCapacity();
+                        }
+                    } else if ("RELEASE".equals(m.type)) {
+                        String customerId = m.field(0);
+                        int roomId = Integer.parseInt(m.field(1));
+                        boolean released = releaseRoom(customerId, roomId);
+                        if (released) {
+                            out.println(new Message("ACKNOWLEDGMENT", m.requestId, serverId, "released"));
+                            reportCapacity();
+                        } else {
+                            out.println(new Message("ERROR", m.requestId, serverId, "release failed"));
+                        }
+                    } else {
+                        out.println(new Message("ERROR", m.requestId, serverId, "unknown message type " + m.type));
+                    }
                 } catch (IllegalArgumentException e) {
                     System.out.println("Rejected message: " + e.getMessage());
                     out.println(new Message("ERROR", "-", serverId, e.getMessage()));

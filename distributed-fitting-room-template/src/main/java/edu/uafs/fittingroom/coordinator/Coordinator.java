@@ -70,7 +70,6 @@ public class Coordinator {
         }
     }
 
-    //Now handles Capacity and heartbeat msgs
     private Message handleMessage(Message m) {
         if (m.type.equals("REGISTER")) {
             registerServer(m);
@@ -79,19 +78,24 @@ public class Coordinator {
         else if (m.type.equals("ARRIVE")) {
             return handleArrive(m);
         }
-        else if(m.type.equals("CAPACITY_UPDATE")){
+        else if (m.type.equals("CAPACITY")) {
             updateCapacity(m);
-             return new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "capacity updated");
-        }
-        else if(m.type.equals("HEARTBEAT")){
-            handleHeartbeat(m);
-             return new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "heartbeat recieved");
+            return new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "capacity updated");
         }
         else {
             throw new IllegalArgumentException("unknown message type " + m.type);
         }
     }
-
+    //updates the capacity of a server based on the received CAPACITY message
+ private synchronized void updateCapacity(Message m) {
+        ServerInfo info = servers.get(m.senderId);
+        if (info == null) {
+            throw new IllegalArgumentException("unknown server " + m.senderId);
+        }
+        int free = Integer.parseInt(m.field(0));
+        info.freeRooms = free;
+        System.out.println("Updated " + m.senderId + " capacity: " + free + "/" + info.totalRooms + " free");
+    }
     private synchronized void registerServer(Message m) {
         String host = m.field(0);
         int serverPort = Integer.parseInt(m.field(1));
@@ -110,86 +114,70 @@ public class Coordinator {
 
         System.out.println(m.senderId + " registered at " + host + ":" + serverPort + " with " + rooms + " rooms");
         System.out.println("Waiting capacity = " + waitingCapacity);
-        
-        //Testing if code works P1 - Can remove
-        /*if(servers.size() >= 2){
-            testSelectBestServer();
-        }*/
     }
 
-    private synchronized Message handleArrive(Message m) {
+   private synchronized Message handleArrive(Message m) {
         System.out.println("Coordinator received ARRIVE from " + m.senderId);
+
+        while (true) {
+            ServerInfo bestServer = selectBestServer();
+            if (bestServer == null) {
+                break; // No servers with free rooms left to try
+            }
+
+            Message reserveReq = new Message("RESERVE_REQUEST", m.requestId, "Coordinator", m.senderId);
+            Message reply = sendReserveRequest(bestServer, reserveReq);
+
+            if (reply != null && "RESERVE_RESPONSE".equals(reply.type)) {
+                int roomNumber = Integer.parseInt(reply.field(0));
+                if (roomNumber != -1) {
+                    System.out.println("Assigned " + m.senderId + " to " + bestServer.serverId + " room " + roomNumber);
+                    return new Message("RESERVATION", m.requestId, "Coordinator", bestServer.host, String.valueOf(bestServer.port), String.valueOf(roomNumber));
+                }
+            }
+
+            // Server returned -1 or failed to respond; mark it 0 so selectBestServer() tries another server
+            bestServer.freeRooms = 0;
+        }
 
         if (waitingQueue.size() >= waitingCapacity) {
             System.out.println("Queue full. Rejecting " + m.senderId);
             return new Message("REJECTED", m.requestId, "Coordinator", "system full");
         }
+
         // Message added to the back of queue
         waitingQueue.offer(m);
         System.out.println("Added " + m.senderId + " to waiting queue.");
         return new Message("WAITING", m.requestId, "Coordinator", "queued at position " + waitingQueue.size());
     }
 
-    private synchronized void updateCapacity(Message m){
-        ServerInfo server = servers.get(m.senderId);
-        if(server == null){
-            throw new IllegalArgumentException("Not registered: " + m.senderId);
-        }
-        int freeRs = Integer.parseInt(m.field(0));
-        if(freeRs < 0 || freeRs > server.totalRooms){
-            throw new IllegalArgumentException("Invalid room count");
-        }
-
-        server.freeRooms = freeRs;
-        System.out.println(server.serverId + " capacity updated - " + server.freeRooms + " free rooms/" + server.totalRooms + " total rooms");
-    }
-
-    private synchronized void handleHeartbeat(Message m){
-        ServerInfo server = servers.get(m.senderId);
-        if(server == null){
-            throw new IllegalArgumentException("Not registered: " + m.senderId);
-        }
-        updateCapacity(m);
-        System.out.println("Heartbeat received from " + server.serverId);
-
-    }
-    
-    private synchronized ServerInfo selectBestServer(){
-        ServerInfo bestServer = null;
-        for(ServerInfo server : servers.values()){
-            if(server.freeRooms > 0){
-                if(bestServer == null || server.freeRooms > bestServer.freeRooms || (server.freeRooms == bestServer.freeRooms && server.serverId.compareTo(bestServer.serverId) < 0)){
-                    bestServer = server;
+    private synchronized ServerInfo selectBestServer() {
+        ServerInfo best = null;
+        for (ServerInfo s : servers.values()) {
+            if (s.freeRooms > 0) {
+                if (best == null || s.freeRooms > best.freeRooms) {
+                    best = s;
                 }
             }
         }
-
-        if(bestServer == null){
-            System.out.println("Servers are all full");
-            return null;
-        }
-
-        System.out.println("Selected server: " + bestServer.serverId + " has " + bestServer.freeRooms + " free rooms");
-        return bestServer;
+        return best;
     }
 
-    //Testing if code works P2 - Can remove
-    /*private synchronized void testSelectBestServer(){
-        ServerInfo s1 = servers.get("Server1");
-        ServerInfo s2 = servers.get("Server2");
+    private Message sendReserveRequest(ServerInfo server, Message request) {
+        try (Socket socket = new Socket(server.host, server.port);
+             PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
 
-        //Save og 
-        int og1 = s1.freeRooms;
-        int og2 = s2.freeRooms;
-
-        s1.freeRooms = 2;
-        s2.freeRooms = 2;
-        ServerInfo selected = selectBestServer();
-        System.out.println("Selected: " + selected.serverId);
-
-        s1.freeRooms = og1;
-        s2.freeRooms = og2;
-    }*/
+            out.println(request);
+            String responseLine = in.readLine();
+            if (responseLine != null) {
+                return Message.parse(responseLine);
+            }
+        } catch (IOException e) {
+            System.out.println("Failed to reach server " + server.serverId + ": " + e.getMessage());
+        }
+        return null;
+    }
 
     // First in queue retrieved and removed. Returns null if empty
     private synchronized Message getWaitingClient() {
