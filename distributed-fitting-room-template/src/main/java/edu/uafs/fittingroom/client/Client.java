@@ -35,10 +35,38 @@ public class Client extends Thread {
             out.println(new Message("ARRIVE", requestId, customerId, customerId));
             System.out.println("[request=" + requestId + "] Customer " + customerId + " enters the system");
             String reply = in.readLine();
-            System.out.println(customerId + " received reply: " + Message.parse(reply).displayMessage());
-            // will make code to where the reply becomes a reservation, a queued notification, or full
+            if (reply == null) {
+                return;
+            }
+           Message msg = Message.parse(reply);
+            System.out.println(customerId + " received reply: " + msg.displayMessage());
+
+            if ("RESERVATION".equals(msg.type)) {
+                String serverHost = msg.field(0);
+                int serverPort = Integer.parseInt(msg.field(1));
+                String roomNumber = msg.field(2);
+
+                // Wait a random 0-1 seconds
+                Thread.sleep((long) (Math.random() * 1000));
+
+                // Connect straight to the server and send RELEASE
+                try (Socket serverSocket = new Socket(serverHost, serverPort);
+                     PrintWriter serverOut = new PrintWriter(serverSocket.getOutputStream(), true);
+                     BufferedReader serverIn = new BufferedReader(new InputStreamReader(serverSocket.getInputStream()))) {
+
+                    String releaseReqId = customerId + "-" + (++requestCount);
+                    serverOut.println(new Message("RELEASE", releaseReqId, customerId, customerId, roomNumber));
+
+                    String serverReply = serverIn.readLine();
+                    if (serverReply != null) {
+                        System.out.println(customerId + " received server reply: " + Message.parse(serverReply).displayMessage());
+                    }
+                }
+            }
         } catch (IOException e) {
             System.out.println(customerId + " could not connect: " + e.getMessage());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 }
