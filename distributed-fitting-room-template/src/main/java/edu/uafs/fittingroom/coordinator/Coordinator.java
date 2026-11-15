@@ -14,15 +14,15 @@ import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.HashMap;
-import java.util.Map;
 import java.util.LinkedList;
+import java.util.Map;
 import java.util.Queue;
 
 public class Coordinator {
     private int port;
     private int waitingCapacity; // 2 x total rooms
     private Map<String, ServerInfo> servers = new HashMap<>();
-    private Queue<Message> waitingQueue = new LinkedList<>();
+    private Queue<WaitingCustomer> waitingQueue = new LinkedList<>(); // global FIFO queue
 
     public Coordinator(int port) {
         this.port = port;
@@ -59,7 +59,10 @@ public class Coordinator {
             String line;
             while ((line = in.readLine()) != null) {
                 try {
-                    out.println(handleMessage(Message.parse(line)));
+                    Message reply = handleMessage(Message.parse(line), out);
+                    if (reply != null) { // null means the handler already sent the reply itself
+                        out.println(reply);
+                    }
                 } catch (IllegalArgumentException e) {
                     System.out.println("Rejected message: " + e.getMessage());
                     out.println(new Message("ERROR", "-", "Coordinator", e.getMessage()));
@@ -70,15 +73,19 @@ public class Coordinator {
         }
     }
 
-    private Message handleMessage(Message m) {
+    private Message handleMessage(Message m, PrintWriter out) {
         if (m.type.equals("REGISTER")) {
             registerServer(m);
             return new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "registered");
         }
         else if (m.type.equals("ARRIVE")) {
-            return handleArrive(m);
+            return handleArrive(m, out);
         }
-        else if (m.type.equals("CAPACITY")) {
+        else if (m.type.equals("DEPART")) {
+            handleDepart(m);
+            return new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "departed");
+        }
+        else if (m.type.equals("CAPACITY_UPDATE")) {
             updateCapacity(m);
             return new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "capacity updated");
         }
@@ -86,8 +93,15 @@ public class Coordinator {
             throw new IllegalArgumentException("unknown message type " + m.type);
         }
     }
-    //updates the capacity of a server based on the received CAPACITY message
- private synchronized void updateCapacity(Message m) {
+
+    // A customer leaves the system
+    private synchronized void handleDepart(Message m) {
+        String customerId = m.senderId;
+        System.out.println(customerId + " departed");
+    }
+
+    // Updates the capacity of a server based on the received CAPACITY_UPDATE message
+    private synchronized void updateCapacity(Message m) {
         ServerInfo info = servers.get(m.senderId);
         if (info == null) {
             throw new IllegalArgumentException("unknown server " + m.senderId);
@@ -95,7 +109,9 @@ public class Coordinator {
         int free = Integer.parseInt(m.field(0));
         info.freeRooms = free;
         System.out.println("Updated " + m.senderId + " capacity: " + free + "/" + info.totalRooms + " free");
+        serveWaitingCustomers();
     }
+
     private synchronized void registerServer(Message m) {
         String host = m.field(0);
         int serverPort = Integer.parseInt(m.field(1));
@@ -116,28 +132,18 @@ public class Coordinator {
         System.out.println("Waiting capacity = " + waitingCapacity);
     }
 
-   private synchronized Message handleArrive(Message m) {
+    // A customer arrives. Order of preference: (1) a room right now, but only if nobody is already waiting, (2) a seat in the waiting queue, (3) rejection if the queue is full
+    private synchronized Message handleArrive(Message m, PrintWriter out) {
         System.out.println("Coordinator received ARRIVE from " + m.senderId);
 
-        while (true) {
-            ServerInfo bestServer = selectBestServer();
-            if (bestServer == null) {
-                break; // No servers with free rooms left to try
+        // people already waiting go first: give them any rooms that are free right now
+        serveWaitingCustomers();
+
+        if (waitingQueue.isEmpty()) {
+            Message reservation = tryReserve(m.senderId, m.requestId);
+            if (reservation != null) {
+                return reservation;
             }
-
-            Message reserveReq = new Message("RESERVE_REQUEST", m.requestId, "Coordinator", m.senderId);
-            Message reply = sendReserveRequest(bestServer, reserveReq);
-
-            if (reply != null && "RESERVE_RESPONSE".equals(reply.type)) {
-                int roomNumber = Integer.parseInt(reply.field(0));
-                if (roomNumber != -1) {
-                    System.out.println("Assigned " + m.senderId + " to " + bestServer.serverId + " room " + roomNumber);
-                    return new Message("RESERVATION", m.requestId, "Coordinator", bestServer.host, String.valueOf(bestServer.port), String.valueOf(roomNumber));
-                }
-            }
-
-            // Server returned -1 or failed to respond; mark it 0 so selectBestServer() tries another server
-            bestServer.freeRooms = 0;
         }
 
         if (waitingQueue.size() >= waitingCapacity) {
@@ -145,10 +151,50 @@ public class Coordinator {
             return new Message("REJECTED", m.requestId, "Coordinator", "system full");
         }
 
-        // Message added to the back of queue
-        waitingQueue.offer(m);
+        // Add the customer to the back of the waiting queue and immediately send them a WAITING message. Because this method is synchronized, the Coordinator holds its lock until the message is sent. This prevents another thread from sending a RESERVATION before the customer receives WAITING.
+        waitingQueue.offer(new WaitingCustomer(m.senderId, m.requestId, out));
         System.out.println("Added " + m.senderId + " to waiting queue.");
-        return new Message("WAITING", m.requestId, "Coordinator", "queued at position " + waitingQueue.size());
+        out.println(new Message("WAITING", m.requestId, "Coordinator", "queued at position " + waitingQueue.size()));
+        return null;
+    }
+
+    // Tries to get a room for one customer. Returns a RESERVATION message, or null if no server has room.
+    private synchronized Message tryReserve(String customerId, String requestId) {
+        while (true) {
+            ServerInfo bestServer = selectBestServer();
+            if (bestServer == null) {
+                return null; // No servers with free rooms left to try
+            }
+
+            Message reserveReq = new Message("RESERVE_REQUEST", requestId, "Coordinator", customerId);
+            Message reply = sendReserveRequest(bestServer, reserveReq);
+
+            if (reply != null && "RESERVE_RESPONSE".equals(reply.type)) {
+                int roomNumber = Integer.parseInt(reply.field(0));
+                if (roomNumber != -1) {
+                    bestServer.freeRooms--; 
+                    System.out.println("Assigned " + customerId + " to " + bestServer.serverId + " room " + roomNumber);
+                    return new Message("RESERVATION", requestId, "Coordinator", bestServer.host, String.valueOf(bestServer.port), String.valueOf(roomNumber));
+                }
+            }
+
+            // Server returned -1 or failed to respond; mark it 0 so selectBestServer() tries another server
+            bestServer.freeRooms = 0;
+        }
+    }
+
+    // Gives free rooms to waiting customers, oldest first. Stops at the first customer who cannot get a room, so nobody is ever served ahead of someone who arrived before them.
+    private synchronized void serveWaitingCustomers() {
+        while (!waitingQueue.isEmpty()) {
+            WaitingCustomer next = waitingQueue.peek();
+            Message reservation = tryReserve(next.customerId, next.requestId);
+            if (reservation == null) {
+                return; // no room yet; we try again on the next capacity update
+            }
+            waitingQueue.poll();
+            next.out.println(reservation);
+            System.out.println("Served waiting customer " + next.customerId + " after " + (System.currentTimeMillis() - next.enqueuedAt) + " ms in the queue");
+        }
     }
 
     private synchronized ServerInfo selectBestServer() {
@@ -168,6 +214,8 @@ public class Coordinator {
              PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
              BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
 
+            // Set a 2-second timeout so the program doesn't wait forever for a response from the server.
+            socket.setSoTimeout(2000);
             out.println(request);
             String responseLine = in.readLine();
             if (responseLine != null) {
@@ -177,10 +225,5 @@ public class Coordinator {
             System.out.println("Failed to reach server " + server.serverId + ": " + e.getMessage());
         }
         return null;
-    }
-
-    // First in queue retrieved and removed. Returns null if empty
-    private synchronized Message getWaitingClient() {
-        return waitingQueue.poll();
     }
 }

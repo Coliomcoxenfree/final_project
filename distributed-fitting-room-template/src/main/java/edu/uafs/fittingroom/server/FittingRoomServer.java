@@ -138,7 +138,7 @@ public class FittingRoomServer {
         try (Socket socket = new Socket(coordHost, coordPort);
              PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
              BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
-            out.println(new Message("CAPACITY", nextRequestId(), serverId, String.valueOf(freeRoomCount()), String.valueOf(roomCount)));
+            out.println(new Message("CAPACITY_UPDATE", nextRequestId(), serverId, String.valueOf(freeRoomCount()), String.valueOf(roomCount)));
             in.readLine();
         } catch (IOException e) {
             System.out.println(serverId + " failed to report capacity: " + e.getMessage());
@@ -156,6 +156,7 @@ public class FittingRoomServer {
                     if ("RESERVE_REQUEST".equals(m.type)) {
                         String customerId = m.field(0);
                         int allocatedRoomId = allocateRoom(customerId);
+                        System.out.println(serverId + " allocated room " + allocatedRoomId + " to " + customerId);
                         out.println(new Message("RESERVE_RESPONSE", m.requestId, serverId, String.valueOf(allocatedRoomId)));
                         if (allocatedRoomId != -1) {
                             reportCapacity();
@@ -164,6 +165,7 @@ public class FittingRoomServer {
                         String customerId = m.field(0);
                         int roomId = Integer.parseInt(m.field(1));
                         boolean released = releaseRoom(customerId, roomId);
+                        System.out.println(serverId + " release of room " + roomId + " by " + customerId + ": " + released);
                         if (released) {
                             out.println(new Message("ACKNOWLEDGMENT", m.requestId, serverId, "released"));
                             reportCapacity();
