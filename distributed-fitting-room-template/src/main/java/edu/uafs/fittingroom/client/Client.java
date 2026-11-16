@@ -32,7 +32,7 @@ public class Client extends Thread {
              PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
              BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
             String requestId = customerId + "-" + (++requestCount);
-            out.println(new Message("ARRIVE", requestId, customerId, customerId));
+            out.println(new Message("ARRIVE", requestId, customerId));
             System.out.println("[request=" + requestId + "] Customer " + customerId + " enters the system");
             String reply = in.readLine();
             if (reply == null) {
@@ -40,6 +40,17 @@ public class Client extends Thread {
             }
            Message msg = Message.parse(reply);
             System.out.println(customerId + " received reply: " + msg.displayMessage());
+
+            // WAITING means the Coordinator queued us. Keep listening until it offers a room.
+            while ("WAITING".equals(msg.type)) {
+                reply = in.readLine();
+                if (reply == null) {
+                    System.out.println(customerId + " lost connection while waiting");
+                    return;
+                }
+                msg = Message.parse(reply);
+                System.out.println(customerId + " received reply: " + msg.displayMessage());
+            }
 
             if ("RESERVATION".equals(msg.type)) {
                 String serverHost = msg.field(0);
@@ -61,6 +72,14 @@ public class Client extends Thread {
                     if (serverReply != null) {
                         System.out.println(customerId + " received server reply: " + Message.parse(serverReply).displayMessage());
                     }
+                }
+
+                // Leave the system: tell the Coordinator client is gone
+                String departReqId = customerId + "-" + (++requestCount);
+                out.println(new Message("DEPART", departReqId, customerId));
+                String departReply = in.readLine();
+                if (departReply != null) {
+                    System.out.println(customerId + " received reply: " + Message.parse(departReply).displayMessage());
                 }
             }
         } catch (IOException e) {
