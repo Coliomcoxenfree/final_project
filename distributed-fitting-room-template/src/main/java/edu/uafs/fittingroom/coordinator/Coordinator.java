@@ -77,48 +77,51 @@ public class Coordinator {
         }
     }
 
-    private Message handleMessage(Message m, PrintWriter out) {
+    private synchronized Message handleMessage(Message m, PrintWriter out) {
         // check if requestid has been completed
         if (m.requestId != null ) {
             if (completedRequests.containsKey(m.requestId)) {
                 System.out.println("[request=" + m.requestId + "] Duplicate " + m.type + " from " + m.senderId);
                 return completedRequests.get(m.requestId);
             }
-
             // If seen and in queue this prevents from processing twice 
             if (!seenRequests.add(m.requestId)) {
                 System.out.println("[request=" + m.requestId + "] Duplicate " + m.type + " from " + m.senderId + " in queue ignored");
                 return null;
             }
         }
-
-        Message response;
-
-        if (m.type.equals("REGISTER")) {
-            registerServer(m);
-            response = new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "registered");
+        try {
+            Message response;
+            if (m.type.equals("REGISTER")) {
+                registerServer(m);
+                response = new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "registered");
+            }
+            else if (m.type.equals("ARRIVE")) {
+                response = handleArrive(m, out);
+            }
+            else if (m.type.equals("DEPART")) {
+                handleDepart(m);
+                response = new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "departed");
+            }
+            else if (m.type.equals("CAPACITY_UPDATE")) {
+                updateCapacity(m);
+                response = new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "capacity updated");
+            }
+            else {
+                throw new IllegalArgumentException("unknown message type " + m.type);
+            }
+            // save response for other duplicates
+            if (m.requestId != null && response != null) {
+                completedRequests.put(m.requestId, response);
+            }
+            return response;
+        } catch (Exception e) {
+            if (m.requestId != null) {
+                seenRequests.remove(m.requestId);
+            }
+            System.out.println("Error: " + e.getMessage());
+            return new Message("ERROR", "-", "coordinator", e.getMessage());
         }
-        else if (m.type.equals("ARRIVE")) {
-            response = handleArrive(m, out);
-        }
-        else if (m.type.equals("DEPART")) {
-            handleDepart(m);
-            response = new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "departed");
-        }
-        else if (m.type.equals("CAPACITY_UPDATE")) {
-            updateCapacity(m);
-            response = new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "capacity updated");
-        }
-        else {
-            throw new IllegalArgumentException("unknown message type " + m.type);
-        }
-
-        // save response for other duplicates
-        if (m.requestId != null && response != null) {
-            completedRequests.put(m.requestId, response);
-        }
-
-        return response;
     }
 
     // A customer leaves the system
@@ -220,6 +223,7 @@ public class Coordinator {
             }
             waitingQueue.poll();
             next.out.println(reservation);
+            completedRequests.put(next.requestId, reservation);
             System.out.println("[request=" + next.requestId + "] Served waiting customer " + next.customerId + " after " + (System.currentTimeMillis() - next.enqueuedAt) + " ms in the queue");
         }
     }

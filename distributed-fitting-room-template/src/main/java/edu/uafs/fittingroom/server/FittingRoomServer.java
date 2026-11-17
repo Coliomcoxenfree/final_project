@@ -14,7 +14,7 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
-import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 
 import edu.uafs.fittingroom.protocol.Message;
@@ -27,7 +27,7 @@ public class FittingRoomServer {
     private int roomCount;
     private Room[] rooms;
     private int requestCount = 0;
-    private Map<String, Message> completedRequests = new HashMap<>();
+    private Map<String, Message> completedRequests = new ConcurrentHashMap<>();
 
     public FittingRoomServer(String serverId, String coordHost, int coordPort, int listenPort, int roomCount) {
         this.serverId = serverId;
@@ -166,11 +166,11 @@ public class FittingRoomServer {
                         int allocatedRoomId = allocateRoom(customerId);
                         System.out.println("[request=" + m.requestId + "] " + serverId + " allocated room " + allocatedRoomId + " to " + customerId);
                         Message reply = new Message("RESERVE_RESPONSE", m.requestId, serverId, String.valueOf(allocatedRoomId));
-                        completedRequests.put(m.requestId, reply); // save to map
-                        out.println(reply);
                         if (allocatedRoomId != -1) {
+                            completedRequests.put(m.requestId, reply); // save to map
                             reportCapacity();
                         }
+                        out.println(reply);
                     } else if ("RELEASE".equals(m.type)) {
                         String customerId = m.field(0);
                         int roomId = Integer.parseInt(m.field(1));

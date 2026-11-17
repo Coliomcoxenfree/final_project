@@ -17,7 +17,7 @@ public class Client extends Thread {
     private String customerId;
     private String coordHost;
     private int coordPort;
-    private static int requestCount = 100;
+    private int requestCount = 0;
 
     public Client(String customerId, String coordHost, int coordPort) {
         this.customerId = customerId;
@@ -31,7 +31,7 @@ public class Client extends Thread {
         try (Socket socket = new Socket(coordHost, coordPort);
              PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
              BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
-            String requestId = String.valueOf(++requestCount);
+            String requestId = customerId + "-" + (++requestCount);
             out.println(new Message("ARRIVE", requestId, customerId));
             System.out.println("[request=" + requestId + "] Customer " + customerId + " enters the system");
             String reply = in.readLine();
