@@ -17,7 +17,7 @@ public class Client extends Thread {
     private String customerId;
     private String coordHost;
     private int coordPort;
-    private int requestCount = 0;
+    private static int requestCount = 100;
 
     public Client(String customerId, String coordHost, int coordPort) {
         this.customerId = customerId;
@@ -31,7 +31,7 @@ public class Client extends Thread {
         try (Socket socket = new Socket(coordHost, coordPort);
              PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
              BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
-            String requestId = customerId + "-" + (++requestCount);
+            String requestId = String.valueOf(++requestCount);
             out.println(new Message("ARRIVE", requestId, customerId));
             System.out.println("[request=" + requestId + "] Customer " + customerId + " enters the system");
             String reply = in.readLine();
@@ -65,7 +65,7 @@ public class Client extends Thread {
                      PrintWriter serverOut = new PrintWriter(serverSocket.getOutputStream(), true);
                      BufferedReader serverIn = new BufferedReader(new InputStreamReader(serverSocket.getInputStream()))) {
 
-                    String releaseReqId = customerId + "-" + (++requestCount);
+                    String releaseReqId = String.valueOf(++requestCount);
                     serverOut.println(new Message("RELEASE", releaseReqId, customerId, customerId, roomNumber));
 
                     String serverReply = serverIn.readLine();
@@ -75,7 +75,7 @@ public class Client extends Thread {
                 }
 
                 // Leave the system: tell the Coordinator client is gone
-                String departReqId = customerId + "-" + (++requestCount);
+                String departReqId = String.valueOf(++requestCount);
                 out.println(new Message("DEPART", departReqId, customerId));
                 String departReply = in.readLine();
                 if (departReply != null) {

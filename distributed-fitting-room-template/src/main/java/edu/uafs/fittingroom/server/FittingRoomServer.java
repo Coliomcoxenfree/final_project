@@ -14,6 +14,8 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.util.HashMap;
+import java.util.Map;
 
 import edu.uafs.fittingroom.protocol.Message;
 
@@ -25,6 +27,7 @@ public class FittingRoomServer {
     private int roomCount;
     private Room[] rooms;
     private int requestCount = 0;
+    private Map<String, Message> completedRequests = new HashMap<>();
 
     public FittingRoomServer(String serverId, String coordHost, int coordPort, int listenPort, int roomCount) {
         this.serverId = serverId;
@@ -153,11 +156,18 @@ public class FittingRoomServer {
             while ((line = in.readLine()) != null) {
                 try {
                     Message m = Message.parse(line);
+                    if (completedRequests.containsKey(m.requestId)) {
+                        System.out.println("[request=" + m.requestId + "] Duplicate ignored " + serverId);
+                        out.println(completedRequests.get(m.requestId));
+                        continue;
+                    }
                     if ("RESERVE_REQUEST".equals(m.type)) {
                         String customerId = m.field(0);
                         int allocatedRoomId = allocateRoom(customerId);
-                        System.out.println(serverId + " allocated room " + allocatedRoomId + " to " + customerId);
-                        out.println(new Message("RESERVE_RESPONSE", m.requestId, serverId, String.valueOf(allocatedRoomId)));
+                        System.out.println("[request=" + m.requestId + "] " + serverId + " allocated room " + allocatedRoomId + " to " + customerId);
+                        Message reply = new Message("RESERVE_RESPONSE", m.requestId, serverId, String.valueOf(allocatedRoomId));
+                        completedRequests.put(m.requestId, reply); // save to map
+                        out.println(reply);
                         if (allocatedRoomId != -1) {
                             reportCapacity();
                         }
@@ -165,12 +175,17 @@ public class FittingRoomServer {
                         String customerId = m.field(0);
                         int roomId = Integer.parseInt(m.field(1));
                         boolean released = releaseRoom(customerId, roomId);
-                        System.out.println(serverId + " release of room " + roomId + " by " + customerId + ": " + released);
+                        System.out.println("[request=" + m.requestId + "] " + serverId + " release of room " + roomId + " by " + customerId + ": " + released);
+                        Message reply;
                         if (released) {
-                            out.println(new Message("ACKNOWLEDGMENT", m.requestId, serverId, "released"));
+                            reply = new Message("ACKNOWLEDGMENT", m.requestId, serverId, "released");
+                            completedRequests.put(m.requestId, reply);
+                            out.println(reply);
                             reportCapacity();
                         } else {
-                            out.println(new Message("ERROR", m.requestId, serverId, "release failed"));
+                            reply = new Message("ERROR", m.requestId, serverId, "release failed");
+                            completedRequests.put(m.requestId, reply);
+                            out.println(reply);
                         }
                     } else {
                         out.println(new Message("ERROR", m.requestId, serverId, "unknown message type " + m.type));
