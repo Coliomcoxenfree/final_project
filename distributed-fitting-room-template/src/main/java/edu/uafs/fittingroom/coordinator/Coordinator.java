@@ -17,12 +17,16 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.Queue;
+import java.util.HashSet;
+import java.util.Set;
 
 public class Coordinator {
     private int port;
     private int waitingCapacity; // 2 x total rooms
     private Map<String, ServerInfo> servers = new HashMap<>();
     private Queue<WaitingCustomer> waitingQueue = new LinkedList<>(); // global FIFO queue
+    private Map<String, Message> completedRequests = new HashMap<>(); // completed request ids and message
+    private Set<String> seenRequests = new HashSet<>(); // all request ids
 
     public Coordinator(int port) {
         this.port = port;
@@ -73,31 +77,57 @@ public class Coordinator {
         }
     }
 
-    private Message handleMessage(Message m, PrintWriter out) {
-        if (m.type.equals("REGISTER")) {
-            registerServer(m);
-            return new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "registered");
+    private synchronized Message handleMessage(Message m, PrintWriter out) {
+        // check if requestid has been completed
+        if (m.requestId != null ) {
+            if (completedRequests.containsKey(m.requestId)) {
+                System.out.println("[request=" + m.requestId + "] Duplicate " + m.type + " from " + m.senderId);
+                return completedRequests.get(m.requestId);
+            }
+            // If seen and in queue this prevents from processing twice 
+            if (!seenRequests.add(m.requestId)) {
+                System.out.println("[request=" + m.requestId + "] Duplicate " + m.type + " from " + m.senderId + " in queue ignored");
+                return null;
+            }
         }
-        else if (m.type.equals("ARRIVE")) {
-            return handleArrive(m, out);
-        }
-        else if (m.type.equals("DEPART")) {
-            handleDepart(m);
-            return new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "departed");
-        }
-        else if (m.type.equals("CAPACITY_UPDATE")) {
-            updateCapacity(m);
-            return new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "capacity updated");
-        }
-        else {
-            throw new IllegalArgumentException("unknown message type " + m.type);
+        try {
+            Message response;
+            if (m.type.equals("REGISTER")) {
+                registerServer(m);
+                response = new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "registered");
+            }
+            else if (m.type.equals("ARRIVE")) {
+                response = handleArrive(m, out);
+            }
+            else if (m.type.equals("DEPART")) {
+                handleDepart(m);
+                response = new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "departed");
+            }
+            else if (m.type.equals("CAPACITY_UPDATE")) {
+                updateCapacity(m);
+                response = new Message("ACKNOWLEDGMENT", m.requestId, "Coordinator", "capacity updated");
+            }
+            else {
+                throw new IllegalArgumentException("unknown message type " + m.type);
+            }
+            // save response for other duplicates
+            if (m.requestId != null && response != null) {
+                completedRequests.put(m.requestId, response);
+            }
+            return response;
+        } catch (Exception e) {
+            if (m.requestId != null) {
+                seenRequests.remove(m.requestId);
+            }
+            System.out.println("Error: " + e.getMessage());
+            return new Message("ERROR", "-", "coordinator", e.getMessage());
         }
     }
 
     // A customer leaves the system
     private synchronized void handleDepart(Message m) {
         String customerId = m.senderId;
-        System.out.println(customerId + " departed");
+        System.out.println("[request=" + m.requestId + "] " + customerId + " departed");
     }
 
     // Updates the capacity of a server based on the received CAPACITY_UPDATE message
@@ -134,7 +164,7 @@ public class Coordinator {
 
     // A customer arrives. Order of preference: (1) a room right now, but only if nobody is already waiting, (2) a seat in the waiting queue, (3) rejection if the queue is full
     private synchronized Message handleArrive(Message m, PrintWriter out) {
-        System.out.println("Coordinator received ARRIVE from " + m.senderId);
+        System.out.println("[request=" + m.requestId + "] Coordinator received ARRIVE from " + m.senderId);
 
         // people already waiting go first: give them any rooms that are free right now
         serveWaitingCustomers();
@@ -147,13 +177,13 @@ public class Coordinator {
         }
 
         if (waitingQueue.size() >= waitingCapacity) {
-            System.out.println("Queue full. Rejecting " + m.senderId);
+            System.out.println("[request=" + m.requestId + "] Queue full. Rejecting " + m.senderId);
             return new Message("REJECTED", m.requestId, "Coordinator", "system full");
         }
 
         // Add the customer to the back of the waiting queue and immediately send them a WAITING message. Because this method is synchronized, the Coordinator holds its lock until the message is sent. This prevents another thread from sending a RESERVATION before the customer receives WAITING.
         waitingQueue.offer(new WaitingCustomer(m.senderId, m.requestId, out));
-        System.out.println("Added " + m.senderId + " to waiting queue.");
+        System.out.println("[request=" + m.requestId + "] Added " + m.senderId + " to waiting queue.");
         out.println(new Message("WAITING", m.requestId, "Coordinator", "queued at position " + waitingQueue.size()));
         return null;
     }
@@ -173,7 +203,7 @@ public class Coordinator {
                 int roomNumber = Integer.parseInt(reply.field(0));
                 if (roomNumber != -1) {
                     bestServer.freeRooms--; 
-                    System.out.println("Assigned " + customerId + " to " + bestServer.serverId + " room " + roomNumber);
+                    System.out.println("[request=" + requestId + "] Assigned " + customerId + " to " + bestServer.serverId + " room " + roomNumber);
                     return new Message("RESERVATION", requestId, "Coordinator", bestServer.host, String.valueOf(bestServer.port), String.valueOf(roomNumber));
                 }
             }
@@ -193,7 +223,8 @@ public class Coordinator {
             }
             waitingQueue.poll();
             next.out.println(reservation);
-            System.out.println("Served waiting customer " + next.customerId + " after " + (System.currentTimeMillis() - next.enqueuedAt) + " ms in the queue");
+            completedRequests.put(next.requestId, reservation);
+            System.out.println("[request=" + next.requestId + "] Served waiting customer " + next.customerId + " after " + (System.currentTimeMillis() - next.enqueuedAt) + " ms in the queue");
         }
     }
 
