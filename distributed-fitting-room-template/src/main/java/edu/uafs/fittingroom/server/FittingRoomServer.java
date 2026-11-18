@@ -14,7 +14,10 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
-import java.util.UUID; 
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
 import edu.uafs.fittingroom.protocol.Message;
 
 public class FittingRoomServer {
@@ -25,6 +28,7 @@ public class FittingRoomServer {
     private int roomCount;
     private Room[] rooms;
     private int requestCount = 0;
+    private Map<String, Message> completedRequests = new ConcurrentHashMap<>(); // replies already sent, by request id
     private static final long RESERVATION_TIMEOUT_MS = Long.getLong("reservation.timeout.ms", 5000L);
 
     public FittingRoomServer(String serverId, String coordHost, int coordPort, int listenPort, int roomCount) {
@@ -187,7 +191,7 @@ public class FittingRoomServer {
             while (true) {
                 try {
                     Thread.sleep(500);
-                }catch (InterruptedException e) {
+                } catch (InterruptedException e) {
                     return;
                 }
                 int expiredReservations = expireReservations();
@@ -208,16 +212,22 @@ public class FittingRoomServer {
             while ((line = in.readLine()) != null) {
                 try {
                     Message m = Message.parse(line);
+                    if (completedRequests.containsKey(m.requestId)) {
+                        System.out.println("[request=" + m.requestId + "] Duplicate ignored " + serverId);
+                        out.println(completedRequests.get(m.requestId));
+                        continue;
+                    }
                     if ("RESERVE_REQUEST".equals(m.type)) {
                         String customerId = m.field(0);
                         Reservation res = reserveRoom(customerId);
                         Message reply;
                         if (res == null) {
                             reply = new Message("RESERVE_RESPONSE", m.requestId, serverId, "-1");
-                            System.out.println(serverId + " has no room for " + customerId);
+                            System.out.println("[request=" + m.requestId + "] " + serverId + " has no room for " + customerId);
                         } else {
                             reply = new Message("RESERVE_RESPONSE", m.requestId, serverId, String.valueOf(res.roomId()), res.token(), String.valueOf(res.expiresAt()));
-                            System.out.println(serverId + " reserved room " + res.roomId() + " for " + customerId);
+                            completedRequests.put(m.requestId, reply); // only successful reservations are cached
+                            System.out.println("[request=" + m.requestId + "] " + serverId + " reserved room " + res.roomId() + " for " + customerId);
                         }
                         out.println(reply);
                         if (res != null) {
@@ -228,22 +238,30 @@ public class FittingRoomServer {
                         int roomId = Integer.parseInt(m.field(0));
                         String token = m.field(1);
                         boolean claimed = claimRoom(customerId, roomId, token);
-                        System.out.println(customerId + " claims room " + roomId + " on " + serverId + ": " + (claimed ? "accepted" : "rejected"));
+                        System.out.println("[request=" + m.requestId + "] " + customerId + " claims room " + roomId + " on " + serverId + ": " + (claimed ? "accepted" : "rejected"));
+                        Message reply;
                         if (claimed) {
-                            out.println(new Message("ACKNOWLEDGMENT", m.requestId, serverId, "claimed"));
-                        } else { 
-                            out.println(new Message("ERROR", m.requestId, serverId, "claim rejected: reservation invalid or expired"));
+                            reply = new Message("ACKNOWLEDGMENT", m.requestId, serverId, "claimed");
+                        } else {
+                            reply = new Message("ERROR", m.requestId, serverId, "claim rejected: reservation invalid or expired");
                         }
+                        completedRequests.put(m.requestId, reply);
+                        out.println(reply);
                     } else if ("RELEASE".equals(m.type)) {
                         String customerId = m.senderId;
                         int roomId = Integer.parseInt(m.field(0));
                         boolean released = releaseRoom(customerId, roomId);
-                        System.out.println(serverId + " release of room " + roomId + " by " + customerId + ": " + released);
+                        System.out.println("[request=" + m.requestId + "] " + serverId + " release of room " + roomId + " by " + customerId + ": " + released);
+                        Message reply;
                         if (released) {
-                            out.println(new Message("ACKNOWLEDGMENT", m.requestId, serverId, "released"));
+                            reply = new Message("ACKNOWLEDGMENT", m.requestId, serverId, "released");
+                            completedRequests.put(m.requestId, reply);
+                            out.println(reply);
                             reportCapacity();
                         } else {
-                            out.println(new Message("ERROR", m.requestId, serverId, "release failed"));
+                            reply = new Message("ERROR", m.requestId, serverId, "release failed");
+                            completedRequests.put(m.requestId, reply);
+                            out.println(reply);
                         }
                     } else {
                         out.println(new Message("ERROR", m.requestId, serverId, "unknown message type " + m.type));
