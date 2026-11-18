@@ -56,21 +56,33 @@ public class Client extends Thread {
                 String serverHost = msg.field(0);
                 int serverPort = Integer.parseInt(msg.field(1));
                 String roomNumber = msg.field(2);
+                String token = msg.field(3);
 
-                // Wait a random 0-1 seconds
-                Thread.sleep((long) (Math.random() * 1000));
-
-                // Connect straight to the server and send RELEASE
+                // Connect straight to the server, claim the room with the token, then release it
                 try (Socket serverSocket = new Socket(serverHost, serverPort);
                      PrintWriter serverOut = new PrintWriter(serverSocket.getOutputStream(), true);
                      BufferedReader serverIn = new BufferedReader(new InputStreamReader(serverSocket.getInputStream()))) {
-
-                    String releaseReqId = customerId + "-" + (++requestCount);
-                    serverOut.println(new Message("RELEASE", releaseReqId, customerId, customerId, roomNumber));
-
-                    String serverReply = serverIn.readLine();
-                    if (serverReply != null) {
-                        System.out.println(customerId + " received server reply: " + Message.parse(serverReply).displayMessage());
+ 
+                    String claimReqId = customerId + "-" + (++requestCount);
+                    serverOut.println(new Message("CLAIM", claimReqId, customerId, roomNumber, token));
+                    String claimLine = serverIn.readLine();
+                    Message claimReply = claimLine == null ? null : Message.parse(claimLine);
+                    if (claimReply != null) {
+                        System.out.println(customerId + " received server reply: " + claimReply.displayMessage());
+                    }
+ 
+                    if (claimReply != null && "ACKNOWLEDGMENT".equals(claimReply.type)) {
+                        // Wait a random 0-1 seconds while trying on clothes
+                        Thread.sleep((long) (Math.random() * 1000));
+ 
+                        String releaseReqId = customerId + "-" + (++requestCount);
+                        serverOut.println(new Message("RELEASE", releaseReqId, customerId, roomNumber));
+                        String serverReply = serverIn.readLine();
+                        if (serverReply != null) {
+                            System.out.println(customerId + " received server reply: " + Message.parse(serverReply).displayMessage());
+                        }
+                    } else {
+                        System.out.println(customerId + " could not claim room " + roomNumber + " (reservation expired)");
                     }
                 }
 
