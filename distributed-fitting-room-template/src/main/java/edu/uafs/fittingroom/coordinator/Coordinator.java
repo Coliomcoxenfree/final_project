@@ -204,7 +204,7 @@ public class Coordinator {
                 if (roomNumber != -1) {
                     bestServer.freeRooms--; 
                     System.out.println("[request=" + requestId + "] Assigned " + customerId + " to " + bestServer.serverId + " room " + roomNumber);
-                    return new Message("RESERVATION", requestId, "Coordinator", bestServer.host, String.valueOf(bestServer.port), String.valueOf(roomNumber));
+                    return new Message("RESERVATION", requestId, "Coordinator", bestServer.host, String.valueOf(bestServer.port), String.valueOf(roomNumber), reply.field(1), reply.field(2));
                 }
             }
 

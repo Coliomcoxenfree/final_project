@@ -14,8 +14,9 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 import edu.uafs.fittingroom.protocol.Message;
 
@@ -27,7 +28,8 @@ public class FittingRoomServer {
     private int roomCount;
     private Room[] rooms;
     private int requestCount = 0;
-    private Map<String, Message> completedRequests = new ConcurrentHashMap<>();
+    private Map<String, Message> completedRequests = new ConcurrentHashMap<>(); // replies already sent, by request id
+    private static final long RESERVATION_TIMEOUT_MS = Long.getLong("reservation.timeout.ms", 5000L);
 
     public FittingRoomServer(String serverId, String coordHost, int coordPort, int listenPort, int roomCount) {
         this.serverId = serverId;
@@ -55,21 +57,55 @@ public class FittingRoomServer {
         new FittingRoomServer(serverId, coordHost, coordPort, listenPort, roomCount).start();
     }
 
-    public synchronized int allocateRoom(String customerId) {
+    public synchronized Reservation reserveRoom(String customerId) {
         for (Room r : rooms) {
             if (customerId.equals(r.ownerId)) {
-                return r.roomId; //Prevents customers from taking multiple rooms at the same time
-            }
-        }
-        for (Room r : rooms) {
-            if (r.state == Room.RoomState.FREE) {
-                r.state = Room.RoomState.OCCUPIED;
-                r.ownerId = customerId;
-                return r.roomId;
+                if (r.state == Room.RoomState.RESERVED) {
+                    return new Reservation(r.roomId, r.token, r.expiresAt); // returns the same reservation since client already has a room reserved 
+                }
+                return null; // returns null since cleint is already in a room
             }
         }
 
-        return -1;
+        for (Room r : rooms) {
+            if (r.state == Room.RoomState.FREE) {
+                r.state = Room.RoomState.RESERVED;
+                r.ownerId = customerId;
+                r.token = UUID.randomUUID().toString();
+                r.expiresAt = System.currentTimeMillis() + RESERVATION_TIMEOUT_MS;
+                return new Reservation(r.roomId, r.token, r.expiresAt);
+            }
+        }
+        return null;
+    }
+
+    public synchronized boolean claimRoom(String customerId, int roomId, String token) {
+        if (roomId < 1 || roomId > rooms.length) {
+            return false;
+        }
+        Room r = rooms[roomId - 1];
+        if (r.state == Room.RoomState.RESERVED && customerId.equals(r.ownerId) && token.equals(r.token) && System.currentTimeMillis() < r.expiresAt) {
+            r.state = Room.RoomState.OCCUPIED;
+            r.token = null;
+            return true;
+        }
+        return false;
+    }
+
+    public synchronized int expireReservations() {
+        long now = System.currentTimeMillis();
+        int freed = 0;
+        for (Room r : rooms) {
+            if (r.state == Room.RoomState.RESERVED && now >= r.expiresAt) {
+                System.out.println(serverId + " reservation expired: room " + r.roomId + " (was held for " + r.ownerId + ")");
+                r.state = Room.RoomState.FREE;
+                r.ownerId = null;
+                r.token = null;
+                r.expiresAt = 0;
+                freed++;
+            }
+        }
+        return freed;
     }
 
     public synchronized boolean releaseRoom(String customerId, int roomId) {
@@ -101,6 +137,7 @@ public class FittingRoomServer {
         try (ServerSocket serverSocket = new ServerSocket(listenPort)) {
             System.out.println(serverId + " listening on port " + listenPort + " with " + roomCount + " rooms");
             registerWithCoordinator();
+            startReservationReaper();
             while (true) {
                 Socket socket = serverSocket.accept();
                 new Thread(() -> handleConnection(socket)).start();
@@ -148,6 +185,25 @@ public class FittingRoomServer {
         }
     }
 
+    // Method for reaper thread: every half second, reaper thread will free expired reservations and tell the Coordinator
+    private void startReservationReaper() {
+        Thread reaper = new Thread(() -> {
+            while (true) {
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    return;
+                }
+                int expiredReservations = expireReservations();
+                if (expiredReservations > 0) {
+                    reportCapacity();
+                }
+            }
+        });
+        reaper.setDaemon(true);
+        reaper.start();
+    }
+
     // Reads msgs from client conn until it closes
     private void handleConnection(Socket socket) {
         try (BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
@@ -163,17 +219,37 @@ public class FittingRoomServer {
                     }
                     if ("RESERVE_REQUEST".equals(m.type)) {
                         String customerId = m.field(0);
-                        int allocatedRoomId = allocateRoom(customerId);
-                        System.out.println("[request=" + m.requestId + "] " + serverId + " allocated room " + allocatedRoomId + " to " + customerId);
-                        Message reply = new Message("RESERVE_RESPONSE", m.requestId, serverId, String.valueOf(allocatedRoomId));
-                        if (allocatedRoomId != -1) {
-                            completedRequests.put(m.requestId, reply); // save to map
-                            reportCapacity();
+                        Reservation res = reserveRoom(customerId);
+                        Message reply;
+                        if (res == null) {
+                            reply = new Message("RESERVE_RESPONSE", m.requestId, serverId, "-1");
+                            System.out.println("[request=" + m.requestId + "] " + serverId + " has no room for " + customerId);
+                        } else {
+                            reply = new Message("RESERVE_RESPONSE", m.requestId, serverId, String.valueOf(res.roomId()), res.token(), String.valueOf(res.expiresAt()));
+                            completedRequests.put(m.requestId, reply); // only successful reservations are cached
+                            System.out.println("[request=" + m.requestId + "] " + serverId + " reserved room " + res.roomId() + " for " + customerId);
                         }
                         out.println(reply);
+                        if (res != null) {
+                            reportCapacity();
+                        }
+                    } else if ("CLAIM".equals(m.type)) {
+                        String customerId = m.senderId;
+                        int roomId = Integer.parseInt(m.field(0));
+                        String token = m.field(1);
+                        boolean claimed = claimRoom(customerId, roomId, token);
+                        System.out.println("[request=" + m.requestId + "] " + customerId + " claims room " + roomId + " on " + serverId + ": " + (claimed ? "accepted" : "rejected"));
+                        Message reply;
+                        if (claimed) {
+                            reply = new Message("ACKNOWLEDGMENT", m.requestId, serverId, "claimed");
+                        } else {
+                            reply = new Message("ERROR", m.requestId, serverId, "claim rejected: reservation invalid or expired");
+                        }
+                        completedRequests.put(m.requestId, reply);
+                        out.println(reply);
                     } else if ("RELEASE".equals(m.type)) {
-                        String customerId = m.field(0);
-                        int roomId = Integer.parseInt(m.field(1));
+                        String customerId = m.senderId;
+                        int roomId = Integer.parseInt(m.field(0));
                         boolean released = releaseRoom(customerId, roomId);
                         System.out.println("[request=" + m.requestId + "] " + serverId + " release of room " + roomId + " by " + customerId + ": " + released);
                         Message reply;
