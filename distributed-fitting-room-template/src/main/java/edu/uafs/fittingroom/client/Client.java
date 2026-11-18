@@ -72,7 +72,7 @@ public class Client extends Thread {
                     }
  
                     if (claimReply != null && "ACKNOWLEDGMENT".equals(claimReply.type)) {
-                        // Wait a random 0-1 seconds while trying on clothes
+                        // Wait a random 0-1 seconds in room
                         Thread.sleep((long) (Math.random() * 1000));
  
                         String releaseReqId = customerId + "-" + (++requestCount);
