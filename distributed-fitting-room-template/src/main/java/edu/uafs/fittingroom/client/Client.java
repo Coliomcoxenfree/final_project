@@ -65,7 +65,7 @@ public class Client extends Thread {
                      PrintWriter serverOut = new PrintWriter(serverSocket.getOutputStream(), true);
                      BufferedReader serverIn = new BufferedReader(new InputStreamReader(serverSocket.getInputStream()))) {
 
-                    String releaseReqId = String.valueOf(++requestCount);
+                    String releaseReqId = customerId + "-" + (++requestCount);
                     serverOut.println(new Message("RELEASE", releaseReqId, customerId, customerId, roomNumber));
 
                     String serverReply = serverIn.readLine();
@@ -75,7 +75,7 @@ public class Client extends Thread {
                 }
 
                 // Leave the system: tell the Coordinator client is gone
-                String departReqId = String.valueOf(++requestCount);
+                String departReqId = customerId + "-" + (++requestCount);
                 out.println(new Message("DEPART", departReqId, customerId));
                 String departReply = in.readLine();
                 if (departReply != null) {
