@@ -42,7 +42,7 @@ public class Client extends Thread {
             if (reply == null) {
                 return;
             }
-           Message msg = Message.parse(reply);
+            Message msg = Message.parse(reply);
             System.out.println(customerId + " received reply: " + msg.displayMessage());
 
             if("WAITING".equals(msg.type)){
