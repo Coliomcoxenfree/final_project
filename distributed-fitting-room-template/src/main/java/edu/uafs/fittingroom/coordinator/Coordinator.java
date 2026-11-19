@@ -83,13 +83,21 @@ public class Coordinator {
     private synchronized Message handleMessage(Message m, PrintWriter out) {
         // check if requestid has been completed
         if (m.requestId != null ) {
+            String dupeCustId = "-";
+            String dupeServerId = "-";
+            if(m.senderId.startsWith("S")){
+                dupeServerId = m.senderId;
+            }
+            else{
+                dupeCustId = m.senderId;
+            }
             if (completedRequests.containsKey(m.requestId)) {
-                System.out.println("[request=" + m.requestId + "] Duplicate " + m.type + " from " + m.senderId);
+                logger.log("DUPLICATE_REQUEST", dupeCustId, dupeServerId, m.requestId, "[request=" + m.requestId + "] Duplicate " + m.type + " from " + m.senderId);
                 return completedRequests.get(m.requestId);
             }
             // If seen and in queue this prevents from processing twice 
             if (!seenRequests.add(m.requestId)) {
-                System.out.println("[request=" + m.requestId + "] Duplicate " + m.type + " from " + m.senderId + " in queue ignored");
+                logger.log("DUPLICATE_REQUEST", dupeCustId, dupeServerId, m.requestId, "[request=" + m.requestId + "] Duplicate " + m.type + " from " + m.senderId + " in queue");
                 return null;
             }
         }
@@ -169,7 +177,7 @@ public class Coordinator {
 
     // A customer arrives. Order of preference: (1) a room right now, but only if nobody is already waiting, (2) a seat in the waiting queue, (3) rejection if the queue is full
     private synchronized Message handleArrive(Message m, PrintWriter out) {
-        logger.log("CUSTOMER_ARRIVED", m.senderId, "-", m.requestId, "Coordinator recieved ARRIVE from " + m.senderId);
+        logger.log("ARRIVE_RECEIVED", m.senderId, "-", m.requestId, "Coordinator recieved ARRIVE from " + m.senderId);
         // people already waiting go first: give them any rooms that are free right now
         serveWaitingCustomers();
 

@@ -42,12 +42,14 @@ public class Client extends Thread {
             if (reply == null) {
                 return;
             }
-           Message msg = Message.parse(reply);
+            Message msg = Message.parse(reply);
             System.out.println(customerId + " received reply: " + msg.displayMessage());
 
             if("WAITING".equals(msg.type)){
                 logger.log("CUSTOMER_WAITING", customerId, "-", requestId, "Customer " + customerId + " is waiting for a room");
             }
+            boolean wasWaiting = "WAITING".equals(msg.type);
+
             // WAITING means the Coordinator queued us. Keep listening until it offers a room.
             while ("WAITING".equals(msg.type)) {
                 reply = in.readLine();
@@ -66,12 +68,15 @@ public class Client extends Thread {
             }
 
             if ("RESERVATION".equals(msg.type)) {
+                if(wasWaiting){
+                    logger.log("CUSTOMER_STOPPED_WAITING", customerId, "-",  requestId, "Customer " + customerId + " leaves the waiting queue");
+                }
                 String serverHost = msg.field(0);
                 int serverPort = Integer.parseInt(msg.field(1));
                 String roomNumber = msg.field(2);
                 String token = msg.field(3);
 
-                logger.log("RESERVATION_RECIEVED", customerId, "-", requestId, customerId + " received room " + roomNumber + " at -");
+                logger.log("RESERVATION_RECEIVED", customerId, "-", requestId, customerId + " received room " + roomNumber + " at " + serverHost + ":" + serverPort);
 
                 // Connect straight to the server, claim the room with the token, then release it
                 try (Socket serverSocket = new Socket(serverHost, serverPort);
@@ -102,7 +107,7 @@ public class Client extends Thread {
                             }
                         }
                     } else {
-                        logger.log("ROOM_CLAIM_FAILED", customerId, "-", "-", customerId + " could not claim room " + roomNumber + " (rservation expired)");
+                        logger.log("ROOM_CLAIM_FAILED", customerId, "-", claimReqId, customerId + " could not claim room " + roomNumber + " (rservation expired)");
                     }
                 }
 

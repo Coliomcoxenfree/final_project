@@ -41,16 +41,7 @@ public class FittingRoomServer {
         this.roomCount = roomCount;
         this.rooms = new Room[roomCount];
 
-        //Log file per server
-        String logFile;
-        if(serverId.startsWith("S")){
-            logFile = "Server" + serverId.substring(1) + ".log";
-        }
-        else{
-            logFile = serverId + ".log";
-        }
-
-        logger = new Logger(serverId, logFile);
+        logger = new Logger(serverId, serverId + ".log");
 
         for(int i = 0; i < roomCount; i++) {
             rooms[i] = new Room(i + 1);
@@ -195,7 +186,7 @@ public class FittingRoomServer {
         try (Socket socket = new Socket(coordHost, coordPort);
              PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
              BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
-            out.println(new Message("CAPACITY_UPDATE", nextRequestId(), serverId, String.valueOf(freeRoomCount()), String.valueOf(roomCount)));
+            out.println(new Message("CAPACITY_UPDATE", requestId, serverId, String.valueOf(freeRoomCount()), String.valueOf(roomCount)));
             in.readLine();
             logger.log("CAPACITY_REPORTED", "-", serverId, requestId, serverId + " reported capacity: " + freeRoomCount() + "/" + roomCount + " free");
         } catch (IOException e) {
