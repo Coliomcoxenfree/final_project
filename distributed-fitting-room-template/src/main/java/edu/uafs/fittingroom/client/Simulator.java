@@ -23,7 +23,7 @@ public class Simulator {
         int customers = Integer.parseInt(args[2]);
         //Logger for stim and client threads
         Logger logger = new Logger("Simulator", "simulator.log");
-        logger.log("SIMULATION_STAERTED", "-", "-", "-", "Simulator creating " + customers + " customers");
+        logger.log("SIMULATION_STARTED", "-", "-", "-", "Simulator creating " + customers + " customers");
 
         Random random = new Random();
         List<Client> clients = new ArrayList<>();
