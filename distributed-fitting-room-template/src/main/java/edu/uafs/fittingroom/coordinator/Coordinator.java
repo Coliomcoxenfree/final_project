@@ -177,7 +177,7 @@ public class Coordinator {
 
     // A customer arrives. Order of preference: (1) a room right now, but only if nobody is already waiting, (2) a seat in the waiting queue, (3) rejection if the queue is full
     private synchronized Message handleArrive(Message m, PrintWriter out) {
-        logger.log("ARRIVE_RECEIVED", m.senderId, "-", m.requestId, "Coordinator recieved ARRIVE from " + m.senderId);
+        logger.log("ARRIVE_RECEIVED", m.senderId, "-", m.requestId, "Coordinator received ARRIVE from " + m.senderId);
         // people already waiting go first: give them any rooms that are free right now
         serveWaitingCustomers();
 
