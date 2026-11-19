@@ -107,7 +107,7 @@ public class Client extends Thread {
                             }
                         }
                     } else {
-                        logger.log("ROOM_CLAIM_FAILED", customerId, "-", claimReqId, customerId + " could not claim room " + roomNumber + " (rservation expired)");
+                        logger.log("ROOM_CLAIM_FAILED", customerId, "-", claimReqId, customerId + " could not claim room " + roomNumber + " (reservation expired)");
                     }
                 }
 
