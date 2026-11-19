@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.Queue;
 import java.util.HashSet;
 import java.util.Set;
+import edu.uafs.fittingroom.protocol.Logger;
 
 public class Coordinator {
     private int port;
@@ -27,10 +28,12 @@ public class Coordinator {
     private Queue<WaitingCustomer> waitingQueue = new LinkedList<>(); // global FIFO queue
     private Map<String, Message> completedRequests = new HashMap<>(); // completed request ids and message
     private Set<String> seenRequests = new HashSet<>(); // all request ids
+    private Logger logger; //creates logger
 
     public Coordinator(int port) {
         this.port = port;
         this.waitingCapacity = 0; // becomes 2 x total rooms as servers register
+        logger = new Logger("Coordinator", "coordinator.log");
     }
 
     public static void main(String[] args) {
@@ -45,7 +48,7 @@ public class Coordinator {
 
     public void start() {
         try (ServerSocket serverSocket = new ServerSocket(port)) {
-            System.out.println("Coordinator listening on port " + port);
+            logger.log("STARTED", "-", "-", "-", "Coordinator listening on port " + port);
             while (true) {
                 Socket socket = serverSocket.accept();
                 // one thread per connection so clients and servers never block each other
@@ -68,7 +71,7 @@ public class Coordinator {
                         out.println(reply);
                     }
                 } catch (IllegalArgumentException e) {
-                    System.out.println("Rejected message: " + e.getMessage());
+                    logger.log("MESSAGE_REJECTED", "-", "-", "-", "Rejected message: " + e.getMessage());
                     out.println(new Message("ERROR", "-", "Coordinator", e.getMessage()));
                 }
             }
@@ -120,6 +123,7 @@ public class Coordinator {
                 seenRequests.remove(m.requestId);
             }
             System.out.println("Error: " + e.getMessage());
+            logger.log("PROCESSING_ERROR", m.senderId, "-", m.requestId, "Error: " + e.getMessage());
             return new Message("ERROR", "-", "coordinator", e.getMessage());
         }
     }
@@ -127,7 +131,7 @@ public class Coordinator {
     // A customer leaves the system
     private synchronized void handleDepart(Message m) {
         String customerId = m.senderId;
-        System.out.println("[request=" + m.requestId + "] " + customerId + " departed");
+        logger.log("CUSTOMER_DEPARTED", customerId, "-", m.requestId, customerId + " departed");
     }
 
     // Updates the capacity of a server based on the received CAPACITY_UPDATE message
@@ -138,6 +142,7 @@ public class Coordinator {
         }
         int free = Integer.parseInt(m.field(0));
         info.freeRooms = free;
+        logger.log("CAPACITY_UPDATED", "-", m.senderId, m.requestId, "Updated " + m.senderId + " capacity: " + free + "/" + info.totalRooms + " free");
         System.out.println("Updated " + m.senderId + " capacity: " + free + "/" + info.totalRooms + " free");
         serveWaitingCustomers();
     }
@@ -158,14 +163,13 @@ public class Coordinator {
         }
         waitingCapacity = 2 * totalRooms;
 
-        System.out.println(m.senderId + " registered at " + host + ":" + serverPort + " with " + rooms + " rooms");
-        System.out.println("Waiting capacity = " + waitingCapacity);
+        logger.log("SERVER_REGISTERED", "-", m.senderId, m.requestId, m.senderId + " registered at " + host + ":" + serverPort + " with " + rooms + " rooms");
+        logger.log("WAITING_CAPACITY_UPDATED", "-", "-", m.requestId, "Waiting capacity = " + waitingCapacity);
     }
 
     // A customer arrives. Order of preference: (1) a room right now, but only if nobody is already waiting, (2) a seat in the waiting queue, (3) rejection if the queue is full
     private synchronized Message handleArrive(Message m, PrintWriter out) {
-        System.out.println("[request=" + m.requestId + "] Coordinator received ARRIVE from " + m.senderId);
-
+        logger.log("CUSTOMER_ARRIVED", m.senderId, "-", m.requestId, "Coordinator recieved ARRIVE from " + m.senderId);
         // people already waiting go first: give them any rooms that are free right now
         serveWaitingCustomers();
 
@@ -178,12 +182,13 @@ public class Coordinator {
 
         if (waitingQueue.size() >= waitingCapacity) {
             System.out.println("[request=" + m.requestId + "] Queue full. Rejecting " + m.senderId);
+            logger.log("QUEUE_FULL", m.senderId, "-", m.requestId, "Queue full. Rejecting " + m.senderId);
             return new Message("REJECTED", m.requestId, "Coordinator", "system full");
         }
 
         // Add the customer to the back of the waiting queue and immediately send them a WAITING message. Because this method is synchronized, the Coordinator holds its lock until the message is sent. This prevents another thread from sending a RESERVATION before the customer receives WAITING.
         waitingQueue.offer(new WaitingCustomer(m.senderId, m.requestId, out));
-        System.out.println("[request=" + m.requestId + "] Added " + m.senderId + " to waiting queue.");
+        logger.log("CUSTOMER_QUEUED", m.senderId, "-", m.requestId, "Added " + m.senderId + " to waiting queue at position " + waitingQueue.size());
         out.println(new Message("WAITING", m.requestId, "Coordinator", "queued at position " + waitingQueue.size()));
         return null;
     }
@@ -203,7 +208,9 @@ public class Coordinator {
                 int roomNumber = Integer.parseInt(reply.field(0));
                 if (roomNumber != -1) {
                     bestServer.freeRooms--; 
-                    System.out.println("[request=" + requestId + "] Assigned " + customerId + " to " + bestServer.serverId + " room " + roomNumber);
+                    String custNum = customerId.substring(1);
+                    String consoleMessage = "[request=" + requestId + "] Customer #" + custNum + " receives a reservation for " + bestServer.serverId + ", room " + roomNumber + ", at " + bestServer.host + ":" + bestServer.port;
+                    logger.log("RESERVATION_SENT", customerId, bestServer.serverId, requestId, consoleMessage);
                     return new Message("RESERVATION", requestId, "Coordinator", bestServer.host, String.valueOf(bestServer.port), String.valueOf(roomNumber), reply.field(1), reply.field(2));
                 }
             }
@@ -224,7 +231,7 @@ public class Coordinator {
             waitingQueue.poll();
             next.out.println(reservation);
             completedRequests.put(next.requestId, reservation);
-            System.out.println("[request=" + next.requestId + "] Served waiting customer " + next.customerId + " after " + (System.currentTimeMillis() - next.enqueuedAt) + " ms in the queue");
+            logger.log("WAITING_CUSTOMER_SERVED", next.customerId, "-", next.requestId, "Served waiting customer " + next.customerId + " after " + (System.currentTimeMillis() - next.enqueuedAt) + " ms in the queue");
         }
     }
 
@@ -254,6 +261,7 @@ public class Coordinator {
             }
         } catch (IOException e) {
             System.out.println("Failed to reach server " + server.serverId + ": " + e.getMessage());
+            logger.log("SERVER_CONNECTION_FAILED", "-", server.serverId, request.requestId, "Failed to reach server " + server.serverId + ": " + e.getMessage());
         }
         return null;
     }
