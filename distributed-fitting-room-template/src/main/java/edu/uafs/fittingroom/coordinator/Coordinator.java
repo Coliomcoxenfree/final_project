@@ -29,6 +29,7 @@ public class Coordinator {
     private Map<String, Message> completedRequests = new HashMap<>(); // completed request ids and message
     private Set<String> seenRequests = new HashSet<>(); // all request ids
     private Logger logger; //creates logger
+    
 
     public Coordinator(int port) {
         this.port = port;
